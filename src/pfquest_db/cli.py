@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 
 from .database import get_connection, init_db, get_db_stats, rebuild_search_index
-from .importers import import_pfquest, import_questie
-from .exporters import export_pfquest, export_questie
+from .importers import import_pfquest, import_questie, import_pfrb
+from .exporters import export_pfquest, export_questie, export_pfrb
 from .schema import SCHEMA_SQL, FTS_SCHEMA_SQL
 
 
@@ -53,6 +53,34 @@ def cmd_export_pfquest(args) -> int:
     conn = get_connection(args.db)
     print(f"Exporting pfQuest [{args.flavor or 'classic'}] data from: {args.db} -> {args.dest}")
     export_pfquest(conn, args.dest, flavor=args.flavor, locale=args.locale)
+    conn.close()
+    print(f"Export complete to: {args.dest}")
+    return 0
+
+
+def cmd_import_pfrb(args) -> int:
+    conn = init_db(args.db)
+    print(f"Importing pfQuest-Reborn [{args.flavor or 'classic'}] data from: {args.src} -> {args.db}")
+    stats = import_pfrb(
+        conn,
+        args.src,
+        flavor=args.flavor,
+        locale=args.locale,
+        base_src=args.base_src,
+    )
+    conn.close()
+    print("Import complete! Records imported/updated:")
+    for table, count in stats.items():
+        if count > 0:
+            print(f"  - {table:15s}: {count:,}")
+    return 0
+
+
+def cmd_export_pfrb(args) -> int:
+    _require_existing_db(args.db)
+    conn = get_connection(args.db)
+    print(f"Exporting pfQuest-Reborn [{args.flavor or 'classic'}] data from: {args.db} -> {args.dest}")
+    export_pfrb(conn, args.dest, flavor=args.flavor, locale=args.locale)
     conn.close()
     print(f"Export complete to: {args.dest}")
     return 0
@@ -248,6 +276,23 @@ def main(argv=None) -> int:
     p_exp_pfq.add_argument("--flavor", default="epoch", help="pfQuest flavor ('epoch', 'wotlk', 'tbc', or '' for classic)")
     p_exp_pfq.add_argument("--locale", default="enUS", help="Locale folder name (default: enUS)")
     p_exp_pfq.set_defaults(func=cmd_export_pfquest)
+
+    # import-pfrb / import-pf-rb
+    p_imp_pfrb = subparsers.add_parser("import-pfrb", aliases=["import-pf-rb"], help="Import pfQuest-Reborn Lua database into SQLite")
+    p_imp_pfrb.add_argument("--src", required=True, help="Path to pfQuest-Reborn addon root directory")
+    p_imp_pfrb.add_argument("--base-src", default=None, help="Optional path to base addon directory to merge before overlay")
+    p_imp_pfrb.add_argument("--db", required=True, help="Path to target SQLite database")
+    p_imp_pfrb.add_argument("--flavor", default="", help="Flavor suffix (default: '' for classic)")
+    p_imp_pfrb.add_argument("--locale", default="enUS", help="Locale folder name (default: enUS)")
+    p_imp_pfrb.set_defaults(func=cmd_import_pfrb)
+
+    # export-pfrb / export-pf-rb
+    p_exp_pfrb = subparsers.add_parser("export-pfrb", aliases=["export-pf-rb"], help="Export SQLite database to pfQuest-Reborn high-performance Lua files")
+    p_exp_pfrb.add_argument("--db", required=True, help="Path to SQLite database")
+    p_exp_pfrb.add_argument("--dest", required=True, help="Path to output directory")
+    p_exp_pfrb.add_argument("--flavor", default="", help="Flavor suffix (default: '' for classic)")
+    p_exp_pfrb.add_argument("--locale", default="enUS", help="Locale folder name (default: enUS)")
+    p_exp_pfrb.set_defaults(func=cmd_export_pfrb)
 
     # import-questie
     p_imp_qst = subparsers.add_parser("import-questie", help="Import Questie Lua database into SQLite")

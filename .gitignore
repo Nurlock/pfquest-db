@@ -13,6 +13,7 @@ wheels/
 *.db-journal
 *.db-wal
 *.db-shm
+reborn.db
 
 # Test caches
 .pytest_cache/
