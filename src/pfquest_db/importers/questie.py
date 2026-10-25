@@ -175,7 +175,7 @@ def import_questie(
 
             conn.executemany(
                 """
-                INSERT INTO unit_spawns (unit_id, zone_id, x, y, respawn_time)
+                INSERT OR IGNORE INTO unit_spawns (unit_id, zone_id, x, y, respawn_time)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 unit_spawn_rows,
@@ -237,7 +237,7 @@ def import_questie(
 
             conn.executemany(
                 """
-                INSERT INTO object_spawns (object_id, zone_id, x, y, respawn_time)
+                INSERT OR IGNORE INTO object_spawns (object_id, zone_id, x, y, respawn_time)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 obj_spawn_rows,
@@ -311,7 +311,7 @@ def import_questie(
         if drop_rows:
             conn.executemany(
                 """
-                INSERT INTO item_drops (item_id, source_type, source_id, drop_chance)
+                INSERT OR IGNORE INTO item_drops (item_id, source_type, source_id, drop_chance)
                 VALUES (?, ?, ?, ?)
                 """,
                 drop_rows,
@@ -330,7 +330,7 @@ def import_questie(
 
             conn.executemany(
                 """
-                INSERT INTO item_vendors (item_id, unit_id, stock)
+                INSERT OR IGNORE INTO item_vendors (item_id, unit_id, stock)
                 VALUES (?, ?, ?)
                 """,
                 vendor_rows,
@@ -494,7 +494,7 @@ def import_questie(
         if starter_rows:
             conn.executemany(
                 """
-                INSERT INTO quest_starters (quest_id, starter_type, starter_id)
+                INSERT OR IGNORE INTO quest_starters (quest_id, starter_type, starter_id)
                 VALUES (?, ?, ?)
                 """,
                 starter_rows,
@@ -503,7 +503,7 @@ def import_questie(
         if finisher_rows:
             conn.executemany(
                 """
-                INSERT INTO quest_finishers (quest_id, finisher_type, finisher_id)
+                INSERT OR IGNORE INTO quest_finishers (quest_id, finisher_type, finisher_id)
                 VALUES (?, ?, ?)
                 """,
                 finisher_rows,
@@ -512,7 +512,7 @@ def import_questie(
         if objective_rows:
             conn.executemany(
                 """
-                INSERT INTO quest_objectives (quest_id, objective_type, target_id, amount, text, icon)
+                INSERT OR IGNORE INTO quest_objectives (quest_id, objective_type, target_id, amount, text, icon)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 objective_rows,
@@ -521,7 +521,7 @@ def import_questie(
         if prereq_rows:
             conn.executemany(
                 """
-                INSERT INTO quest_prerequisites (quest_id, pre_quest_id, is_group)
+                INSERT OR IGNORE INTO quest_prerequisites (quest_id, pre_quest_id, is_group)
                 VALUES (?, ?, ?)
                 """,
                 prereq_rows,
@@ -530,7 +530,7 @@ def import_questie(
         if exclusive_rows:
             conn.executemany(
                 """
-                INSERT INTO quest_exclusive (quest_id, exclusive_quest_id)
+                INSERT OR IGNORE INTO quest_exclusive (quest_id, exclusive_quest_id)
                 VALUES (?, ?)
                 """,
                 exclusive_rows,

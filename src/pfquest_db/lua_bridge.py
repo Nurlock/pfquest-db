@@ -66,7 +66,7 @@ def iter_lua_table_entries(
         files = [Path(f) for f in lua_file_or_files]
 
     load_statements = "\n".join(
-        f'dofile([[{str(f.resolve())}]])' for f in files if f.exists()
+        f'dofile({json.dumps(str(f.resolve()))})' for f in files if f.exists()
     )
 
     lua_script = f"""
@@ -93,20 +93,33 @@ end
         text=True,
     )
 
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            k, v = json.loads(line)
-            yield k, v
-        except json.JSONDecodeError:
-            continue
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                k, v = json.loads(line)
+                yield k, v
+            except json.JSONDecodeError:
+                continue
 
-    _, stderr = proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"Lua execution failed ({proc.returncode}): {stderr}")
+        _, stderr = proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Lua execution failed ({proc.returncode}): {stderr}")
+    finally:
+        if proc.stdout and not proc.stdout.closed:
+            proc.stdout.close()
+        if proc.stderr and not proc.stderr.closed:
+            proc.stderr.close()
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
 
 
 def load_lua_table(

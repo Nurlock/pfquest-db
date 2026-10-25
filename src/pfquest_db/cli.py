@@ -10,6 +10,12 @@ from .exporters import export_pfquest, export_questie
 from .schema import SCHEMA_SQL
 
 
+def _require_existing_db(db_path: str) -> None:
+    if not Path(db_path).is_file():
+        print(f"Error: Database file '{db_path}' not found.", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_init(args) -> int:
     conn = init_db(args.db)
     conn.close()
@@ -30,6 +36,7 @@ def cmd_import_pfquest(args) -> int:
 
 
 def cmd_export_pfquest(args) -> int:
+    _require_existing_db(args.db)
     conn = get_connection(args.db)
     print(f"Exporting pfQuest [{args.flavor or 'classic'}] data from: {args.db} -> {args.dest}")
     export_pfquest(conn, args.dest, flavor=args.flavor, locale=args.locale)
@@ -51,6 +58,7 @@ def cmd_import_questie(args) -> int:
 
 
 def cmd_export_questie(args) -> int:
+    _require_existing_db(args.db)
     conn = get_connection(args.db)
     print(f"Exporting Questie [{args.flavor}] data from: {args.db} -> {args.dest}")
     export_questie(conn, args.dest, flavor=args.flavor)
@@ -60,6 +68,7 @@ def cmd_export_questie(args) -> int:
 
 
 def cmd_stats(args) -> int:
+    _require_existing_db(args.db)
     conn = get_connection(args.db)
     stats = get_db_stats(conn)
     conn.close()
@@ -74,8 +83,15 @@ def cmd_stats(args) -> int:
 
 
 def cmd_query(args) -> int:
+    _require_existing_db(args.db)
     conn = get_connection(args.db)
     cur = conn.execute(args.sql)
+    if cur.description is None:
+        conn.commit()
+        print(f"Query executed successfully ({cur.rowcount} row(s) affected).")
+        conn.close()
+        return 0
+
     rows = cur.fetchall()
     if not rows:
         print("No results returned.")

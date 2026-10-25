@@ -197,7 +197,7 @@ def import_pfquest(
 
     conn.executemany(
         """
-        INSERT INTO unit_spawns (unit_id, zone_id, x, y, respawn_time)
+        INSERT OR IGNORE INTO unit_spawns (unit_id, zone_id, x, y, respawn_time)
         VALUES (?, ?, ?, ?, ?)
         """,
         spawn_rows,
@@ -259,7 +259,7 @@ def import_pfquest(
 
     conn.executemany(
         """
-        INSERT INTO object_spawns (object_id, zone_id, x, y, respawn_time)
+        INSERT OR IGNORE INTO object_spawns (object_id, zone_id, x, y, respawn_time)
         VALUES (?, ?, ?, ?, ?)
         """,
         obj_spawn_rows,
@@ -325,7 +325,7 @@ def import_pfquest(
 
     conn.executemany(
         """
-        INSERT INTO item_drops (item_id, source_type, source_id, drop_chance)
+        INSERT OR IGNORE INTO item_drops (item_id, source_type, source_id, drop_chance)
         VALUES (?, ?, ?, ?)
         """,
         drop_rows,
@@ -334,7 +334,7 @@ def import_pfquest(
 
     conn.executemany(
         """
-        INSERT INTO item_vendors (item_id, unit_id, stock)
+        INSERT OR IGNORE INTO item_vendors (item_id, unit_id, stock)
         VALUES (?, ?, ?)
         """,
         vendor_rows,
@@ -518,35 +518,35 @@ def import_pfquest(
 
     conn.executemany(
         """
-        INSERT INTO quest_starters (quest_id, starter_type, starter_id)
+        INSERT OR IGNORE INTO quest_starters (quest_id, starter_type, starter_id)
         VALUES (?, ?, ?)
         """,
         starter_rows,
     )
     conn.executemany(
         """
-        INSERT INTO quest_finishers (quest_id, finisher_type, finisher_id)
+        INSERT OR IGNORE INTO quest_finishers (quest_id, finisher_type, finisher_id)
         VALUES (?, ?, ?)
         """,
         finisher_rows,
     )
     conn.executemany(
         """
-        INSERT INTO quest_objectives (quest_id, objective_type, target_id, amount, text, icon)
+        INSERT OR IGNORE INTO quest_objectives (quest_id, objective_type, target_id, amount, text, icon)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
         objective_rows,
     )
     conn.executemany(
         """
-        INSERT INTO quest_prerequisites (quest_id, pre_quest_id, is_group)
+        INSERT OR IGNORE INTO quest_prerequisites (quest_id, pre_quest_id, is_group)
         VALUES (?, ?, ?)
         """,
         prereq_rows,
     )
     conn.executemany(
         """
-        INSERT INTO quest_exclusive (quest_id, exclusive_quest_id)
+        INSERT OR IGNORE INTO quest_exclusive (quest_id, exclusive_quest_id)
         VALUES (?, ?)
         """,
         exclusive_rows,
@@ -593,7 +593,7 @@ def import_pfquest(
                     meta_rows.append((str(category), int(eid), str(val) if val is not None else None))
     if meta_rows:
         conn.executemany(
-            "INSERT INTO meta (category, entity_id, value) VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO meta (category, entity_id, value) VALUES (?, ?, ?)",
             meta_rows,
         )
         stats["meta"] = len(meta_rows)

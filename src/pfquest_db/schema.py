@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS unit_spawns (
     zone_id INTEGER NOT NULL REFERENCES zones(id),
     x REAL NOT NULL,
     y REAL NOT NULL,
-    respawn_time INTEGER DEFAULT 0
+    respawn_time INTEGER DEFAULT 0,
+    UNIQUE(unit_id, zone_id, x, y)
 );
 
 -- Game Objects
@@ -49,7 +50,8 @@ CREATE TABLE IF NOT EXISTS object_spawns (
     zone_id INTEGER NOT NULL REFERENCES zones(id),
     x REAL NOT NULL,
     y REAL NOT NULL,
-    respawn_time INTEGER DEFAULT 0
+    respawn_time INTEGER DEFAULT 0,
+    UNIQUE(object_id, zone_id, x, y)
 );
 
 -- Items
@@ -72,7 +74,8 @@ CREATE TABLE IF NOT EXISTS item_drops (
     item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
     source_type TEXT NOT NULL CHECK(source_type IN ('unit', 'object')),
     source_id INTEGER NOT NULL,
-    drop_chance REAL NOT NULL
+    drop_chance REAL NOT NULL,
+    UNIQUE(item_id, source_type, source_id)
 );
 
 -- Item vendor sources
@@ -80,7 +83,8 @@ CREATE TABLE IF NOT EXISTS item_vendors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
     unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
-    stock INTEGER DEFAULT 0
+    stock INTEGER DEFAULT 0,
+    UNIQUE(item_id, unit_id)
 );
 
 -- Quests
@@ -111,7 +115,8 @@ CREATE TABLE IF NOT EXISTS quest_starters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     quest_id INTEGER NOT NULL REFERENCES quests(id) ON DELETE CASCADE,
     starter_type TEXT NOT NULL CHECK(starter_type IN ('unit', 'object', 'item')),
-    starter_id INTEGER NOT NULL
+    starter_id INTEGER NOT NULL,
+    UNIQUE(quest_id, starter_type, starter_id)
 );
 
 -- Quest Finishers
@@ -119,7 +124,8 @@ CREATE TABLE IF NOT EXISTS quest_finishers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     quest_id INTEGER NOT NULL REFERENCES quests(id) ON DELETE CASCADE,
     finisher_type TEXT NOT NULL CHECK(finisher_type IN ('unit', 'object')),
-    finisher_id INTEGER NOT NULL
+    finisher_id INTEGER NOT NULL,
+    UNIQUE(quest_id, finisher_type, finisher_id)
 );
 
 -- Quest Objectives
@@ -130,7 +136,8 @@ CREATE TABLE IF NOT EXISTS quest_objectives (
     target_id INTEGER,
     amount INTEGER DEFAULT 0,
     text TEXT,
-    icon TEXT
+    icon TEXT,
+    UNIQUE(quest_id, objective_type, target_id)
 );
 
 -- Quest Prerequisites
@@ -138,14 +145,16 @@ CREATE TABLE IF NOT EXISTS quest_prerequisites (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     quest_id INTEGER NOT NULL REFERENCES quests(id) ON DELETE CASCADE,
     pre_quest_id INTEGER NOT NULL,
-    is_group INTEGER DEFAULT 0
+    is_group INTEGER DEFAULT 0,
+    UNIQUE(quest_id, pre_quest_id, is_group)
 );
 
 -- Mutually Exclusive / Conflicting Quests
 CREATE TABLE IF NOT EXISTS quest_exclusive (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     quest_id INTEGER NOT NULL REFERENCES quests(id) ON DELETE CASCADE,
-    exclusive_quest_id INTEGER NOT NULL
+    exclusive_quest_id INTEGER NOT NULL,
+    UNIQUE(quest_id, exclusive_quest_id)
 );
 
 -- Area Triggers
@@ -162,7 +171,8 @@ CREATE TABLE IF NOT EXISTS meta (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category TEXT NOT NULL,
     entity_id INTEGER NOT NULL,
-    value TEXT
+    value TEXT,
+    UNIQUE(category, entity_id)
 );
 
 -- Minimap area scaling

@@ -2,6 +2,7 @@
 
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
 
 def _lua_str(s: str) -> str:
@@ -37,6 +38,15 @@ def _serialize_compact(val) -> str:
             items.append(f"{k_str}={_serialize_compact(v)}")
         return "{" + ",".join(items) + "}"
     return "nil"
+
+
+def _clean_sparse_list(lst: Optional[list]) -> Optional[list]:
+    if not lst or not any(lst):
+        return None
+    cleaned = [x if x else None for x in lst]
+    while cleaned and cleaned[-1] is None:
+        cleaned.pop()
+    return cleaned if cleaned else None
 
 
 def _trim_trailing_nils(arr: list) -> list:
@@ -297,19 +307,13 @@ def export_questie(
             ) = r
 
             # Starters: {[1]=creatures, [2]=objects, [3]=items}
-            st = starters.get(qid)
-            if st and not any(st):
-                st = None
+            st = _clean_sparse_list(starters.get(qid))
 
             # Finishers: {[1]=creatures, [2]=objects}
-            fin = finishers.get(qid)
-            if fin and not any(fin):
-                fin = None
+            fin = _clean_sparse_list(finishers.get(qid))
 
             # Objectives: {[1]=creatures, [2]=objects, [3]=items}
-            objs = objectives.get(qid)
-            if objs and not any(objs):
-                objs = None
+            objs = _clean_sparse_list(objectives.get(qid))
 
             # Skill
             req_skill = [sk_id, sk_val] if sk_id is not None and sk_val is not None else None

@@ -57,3 +57,24 @@ def test_pfquest_epoch_import_and_export(tmp_path, repo_root):
     assert rt_stats["units"] == stats["units"]
     assert rt_stats["objects"] == stats["objects"]
     assert rt_stats["items"] == stats["items"]
+
+
+def test_pfquest_idempotent_reimport(tmp_path, repo_root):
+    epoch_dir = repo_root / "pfQuest-epoch"
+    if not epoch_dir.exists():
+        pytest.skip(f"pfQuest-epoch not found at {epoch_dir}")
+
+    db_path = tmp_path / "idempotent.db"
+    conn = init_db(db_path)
+
+    # First import
+    import_pfquest(epoch_dir, conn, flavor="epoch")
+    stats1 = get_db_stats(conn)
+
+    # Second import on the same connection
+    import_pfquest(epoch_dir, conn, flavor="epoch")
+    stats2 = get_db_stats(conn)
+    conn.close()
+
+    # Counts must be identical (no duplicated records)
+    assert stats1 == stats2

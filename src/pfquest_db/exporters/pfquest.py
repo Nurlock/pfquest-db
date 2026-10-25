@@ -16,36 +16,6 @@ def _lua_str(s: str) -> str:
     return f'"{s}"'
 
 
-def _format_lua_val(val, indent: int = 1) -> str:
-    pad = "  " * indent
-    if isinstance(val, (int, float)):
-        return str(val)
-    if isinstance(val, str):
-        return _lua_str(val)
-    if isinstance(val, bool):
-        return "true" if val else "false"
-    if isinstance(val, list):
-        if not val:
-            return "{}"
-        # If simple flat array of numbers
-        if all(isinstance(x, (int, float)) for x in val) and len(val) <= 6:
-            return "{ " + ", ".join(str(x) for x in val) + " }"
-        parts = []
-        for x in val:
-            parts.append(f"{pad}  {_format_lua_val(x, indent + 1)},")
-        return "{\n" + "\n".join(parts) + f"\n{pad}}}"
-    if isinstance(val, dict):
-        if not val:
-            return "{}"
-        parts = []
-        for k in sorted(val.keys(), key=lambda x: (str(type(x)), x)):
-            key_str = f"[{k}]" if isinstance(k, int) else f'["{k}"]'
-            v_str = _format_lua_val(val[k], indent + 1)
-            parts.append(f"{pad}  {key_str} = {v_str},")
-        return "{\n" + "\n".join(parts) + f"\n{pad}}}"
-    return "nil"
-
-
 def export_pfquest(
     conn: sqlite3.Connection,
     output_dir: str | Path,
