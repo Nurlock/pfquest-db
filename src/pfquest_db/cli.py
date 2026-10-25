@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .database import get_connection, init_db, get_db_stats, rebuild_search_index
 from .importers import import_pfquest, import_questie, import_pfrb
-from .exporters import export_pfquest, export_questie, export_pfrb
+from .exporters import export_pfquest, export_questie, export_pfrb, export_pfrb_lod_module, export_all_lod_modules
 from .schema import SCHEMA_SQL, FTS_SCHEMA_SQL
 
 
@@ -79,10 +79,32 @@ def cmd_import_pfrb(args) -> int:
 def cmd_export_pfrb(args) -> int:
     _require_existing_db(args.db)
     conn = get_connection(args.db)
+    if getattr(args, "lod", False):
+        flavor = args.flavor or "vanilla"
+        print(f"Exporting pfQuest-Reborn LoD module [{flavor}] from: {args.db} -> {args.dest}")
+        mod_dir = export_pfrb_lod_module(conn, args.dest, flavor=flavor, locale=args.locale)
+        conn.close()
+        print(f"LoD module export complete: {mod_dir}")
+        return 0
+
     print(f"Exporting pfQuest-Reborn [{args.flavor or 'classic'}] data from: {args.db} -> {args.dest}")
     export_pfrb(conn, args.dest, flavor=args.flavor, locale=args.locale)
     conn.close()
     print(f"Export complete to: {args.dest}")
+    return 0
+
+
+def cmd_export_pfrb_all(args) -> int:
+    ref_dir = Path(args.ref_dir)
+    if not ref_dir.is_dir():
+        print(f"Error: Reference directory '{args.ref_dir}' not found.", file=sys.stderr)
+        return 1
+
+    print(f"Exporting all pfQuest-Reborn LoD modules from {ref_dir} -> {args.dest} ...")
+    exported = export_all_lod_modules(ref_dir, args.dest, locale=args.locale)
+    print(f"Successfully exported {len(exported)} LoD modules:")
+    for mod in exported:
+        print(f"  - {mod.name} ({mod})")
     return 0
 
 
@@ -290,9 +312,17 @@ def main(argv=None) -> int:
     p_exp_pfrb = subparsers.add_parser("export-pfrb", aliases=["export-pf-rb"], help="Export SQLite database to pfQuest-Reborn high-performance Lua files")
     p_exp_pfrb.add_argument("--db", required=True, help="Path to SQLite database")
     p_exp_pfrb.add_argument("--dest", required=True, help="Path to output directory")
-    p_exp_pfrb.add_argument("--flavor", default="", help="Flavor suffix (default: '' for classic)")
+    p_exp_pfrb.add_argument("--flavor", default="", help="Flavor suffix or module name (e.g. 'vanilla', 'epoch', 'tbc', 'wotlk')")
     p_exp_pfrb.add_argument("--locale", default="enUS", help="Locale folder name (default: enUS)")
+    p_exp_pfrb.add_argument("--lod", action="store_true", help="Export as a standalone Load-on-Demand (LoD) addon module")
     p_exp_pfrb.set_defaults(func=cmd_export_pfrb)
+
+    # export-pfrb-all / export-pf-rb-all
+    p_exp_pfrb_all = subparsers.add_parser("export-pfrb-all", aliases=["export-pf-rb-all"], help="Export all reference SQLite DBs (vanilla, epoch, tbc, wotlk) as standalone LoD addon modules")
+    p_exp_pfrb_all.add_argument("--ref-dir", default="ref", help="Path to directory containing reference .db files (default: 'ref')")
+    p_exp_pfrb_all.add_argument("--dest", required=True, help="Path to destination directory (e.g. AddOns folder or repo root)")
+    p_exp_pfrb_all.add_argument("--locale", default="enUS", help="Locale folder name (default: enUS)")
+    p_exp_pfrb_all.set_defaults(func=cmd_export_pfrb_all)
 
     # import-questie
     p_imp_qst = subparsers.add_parser("import-questie", help="Import Questie Lua database into SQLite")

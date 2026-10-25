@@ -360,3 +360,112 @@ def export_pfrb(
             for pid, name in prof_rows:
                 f.write(f"  [{pid}] = {_lua_str(name)},\n")
             f.write("}\n")
+
+
+FLAVOR_TITLES = {
+    "vanilla": "Vanilla",
+    "epoch": "Project Epoch",
+    "tbc": "The Burning Crusade",
+    "wotlk": "Wrath of the Lich King",
+}
+
+
+def export_pfrb_lod_module(
+    conn: sqlite3.Connection,
+    output_dir: str | Path,
+    flavor: str,
+    locale: str = "enUS",
+) -> Path:
+    """
+    Export SQLite database as a standalone Load-on-Demand (LoD) addon module
+    named 'pfQuest-Reborn-{flavor}'.
+    """
+    out_path = Path(output_dir)
+    mod_name = f"pfQuest-Reborn-{flavor}"
+    mod_dir = out_path / mod_name
+    mod_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Export Lua database files with flavor="" so they directly populate pfDB["..."]["data"] and pfDB["..."]["enUS"]
+    export_pfrb(conn, mod_dir, flavor="", locale=locale)
+
+    # 2. Generate init/data.xml
+    init_dir = mod_dir / "init"
+    init_dir.mkdir(parents=True, exist_ok=True)
+
+    data_includes = [
+        r'  <Include file="..\db\items.lua" />',
+        r'  <Include file="..\db\units.lua" />',
+        r'  <Include file="..\db\objects.lua" />',
+        r'  <Include file="..\db\quests.lua" />',
+        r'  <Include file="..\db\zones.lua" />',
+    ]
+    if (mod_dir / "db" / "minimap.lua").exists():
+        data_includes.append(r'  <Include file="..\db\minimap.lua" />')
+    if (mod_dir / "db" / "areatrigger.lua").exists():
+        data_includes.append(r'  <Include file="..\db\areatrigger.lua" />')
+    if (mod_dir / "db" / "meta.lua").exists():
+        data_includes.append(r'  <Include file="..\db\meta.lua" />')
+
+    with open(init_dir / "data.xml", "w", encoding="utf-8") as f:
+        f.write('<Ui xmlns="http://www.blizzard.com/wow/ui/">\n')
+        for inc in data_includes:
+            f.write(f"{inc}\n")
+        f.write("</Ui>\n")
+
+    # 3. Generate init/{locale}.xml
+    loc_includes = [
+        f'  <Include file="..\\db\\{locale}\\items.lua" />',
+        f'  <Include file="..\\db\\{locale}\\units.lua" />',
+        f'  <Include file="..\\db\\{locale}\\objects.lua" />',
+        f'  <Include file="..\\db\\{locale}\\quests.lua" />',
+        f'  <Include file="..\\db\\{locale}\\zones.lua" />',
+    ]
+    if (mod_dir / "db" / locale / "professions.lua").exists():
+        loc_includes.append(f'  <Include file="..\\db\\{locale}\\professions.lua" />')
+
+    with open(init_dir / f"{locale}.xml", "w", encoding="utf-8") as f:
+        f.write('<Ui xmlns="http://www.blizzard.com/wow/ui/">\n')
+        for inc in loc_includes:
+            f.write(f"{inc}\n")
+        f.write("</Ui>\n")
+
+    # 4. Generate TOC
+    title = FLAVOR_TITLES.get(flavor, flavor.capitalize())
+    toc_content = f"""## Interface: 30300
+## Title: |cff33ffccpf|cffffffffQuest|r |cFF888888[Reborn]|r - {title} Database
+## Notes: Load-on-Demand database ({title}) for pfQuest-Reborn
+## Author: Shagu, txtsd, Nurlock
+## Version: 1.0.0
+## Dependencies: pfQuest-Reborn
+## LoadOnDemand: 1
+
+init\\data.xml
+init\\{locale}.xml
+"""
+    with open(mod_dir / f"{mod_name}.toc", "w", encoding="utf-8") as f:
+        f.write(toc_content)
+
+    return mod_dir
+
+
+def export_all_lod_modules(
+    ref_dir: str | Path,
+    output_dir: str | Path,
+    locale: str = "enUS",
+) -> list[Path]:
+    """
+    Export all reference SQLite databases (vanilla, epoch, tbc, wotlk) in ref_dir
+    as standalone LoD addon modules in output_dir.
+    """
+    ref_path = Path(ref_dir)
+    exported = []
+    for flavor in ("vanilla", "epoch", "tbc", "wotlk"):
+        db_file = ref_path / f"{flavor}.db"
+        if not db_file.exists():
+            continue
+        conn = sqlite3.connect(db_file)
+        mod_dir = export_pfrb_lod_module(conn, output_dir, flavor, locale=locale)
+        conn.close()
+        exported.append(mod_dir)
+    return exported
+
