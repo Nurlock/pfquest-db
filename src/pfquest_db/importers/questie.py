@@ -48,6 +48,37 @@ def _id_list(val) -> list[int]:
     return res
 
 
+def _iter_spawns(spawns: Any):
+    """Yield (zone_id, x, y) from either a dict {zone_id: [[x, y], ...]} or 1-based list."""
+    if isinstance(spawns, dict):
+        for zid_str, pts in spawns.items():
+            try:
+                zid = int(zid_str)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(pts, list):
+                for pt in pts:
+                    if isinstance(pt, list) and len(pt) >= 2:
+                        try:
+                            x, y = float(pt[0]), float(pt[1])
+                            if x >= 0 and y >= 0:
+                                yield zid, x, y
+                        except (ValueError, TypeError):
+                            pass
+    elif isinstance(spawns, list):
+        for idx_0, pts in enumerate(spawns):
+            zid = idx_0 + 1
+            if isinstance(pts, list):
+                for pt in pts:
+                    if isinstance(pt, list) and len(pt) >= 2:
+                        try:
+                            x, y = float(pt[0]), float(pt[1])
+                            if x >= 0 and y >= 0:
+                                yield zid, x, y
+                        except (ValueError, TypeError):
+                            pass
+
+
 def import_questie(
     base_dir: str | Path,
     conn: sqlite3.Connection,
@@ -134,16 +165,10 @@ def import_questie(
             unit_rows.append((uid_int, name, min_l, max_l, rank, fac, sub_name, npc_flags))
 
             # Spawns: { [zoneID] = { {x, y}, ... } } at index 7
-            spawns = _get_field(ndata, 7) or {}
-            if isinstance(spawns, dict):
-                for zid_str, pts in spawns.items():
-                    zid = int(zid_str)
-                    if isinstance(pts, list):
-                        for pt in pts:
-                            if isinstance(pt, list) and len(pt) >= 2:
-                                x, y = float(pt[0]), float(pt[1])
-                                if x >= 0 and y >= 0:
-                                    unit_spawn_rows.append((uid_int, zid, x, y, 0))
+            spawns = _get_field(ndata, 7)
+            if spawns:
+                for zid, x, y in _iter_spawns(spawns):
+                    unit_spawn_rows.append((uid_int, zid, x, y, 0))
 
         if unit_rows:
             conn.executemany(
@@ -201,16 +226,10 @@ def import_questie(
             obj_rows.append((oid_int, name, None, fac_id))
 
             # Spawns at index 4
-            spawns = _get_field(odata, 4) or {}
-            if isinstance(spawns, dict):
-                for zid_str, pts in spawns.items():
-                    zid = int(zid_str)
-                    if isinstance(pts, list):
-                        for pt in pts:
-                            if isinstance(pt, list) and len(pt) >= 2:
-                                x, y = float(pt[0]), float(pt[1])
-                                if x >= 0 and y >= 0:
-                                    obj_spawn_rows.append((oid_int, zid, x, y, 0))
+            spawns = _get_field(odata, 4)
+            if spawns:
+                for zid, x, y in _iter_spawns(spawns):
+                    obj_spawn_rows.append((oid_int, zid, x, y, 0))
 
         if obj_rows:
             conn.executemany(

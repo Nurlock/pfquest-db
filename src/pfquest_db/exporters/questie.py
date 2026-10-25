@@ -316,7 +316,7 @@ def export_questie(
             objs = _clean_sparse_list(objectives.get(qid))
 
             # Skill
-            req_skill = [sk_id, sk_val] if sk_id is not None and sk_val is not None else None
+            req_skill = [sk_id, sk_val if sk_val is not None else 1] if sk_id is not None else None
             req_min_rep = [min_rep_f, min_rep_v] if min_rep_f is not None and min_rep_v is not None else None
             req_max_rep = [max_rep_f, max_rep_v] if max_rep_f is not None and max_rep_v is not None else None
 
