@@ -236,8 +236,9 @@ def import_pfquest(
                     spawn_rows.append((uid_int, zone_id, x, y, respawn))
 
     # Add any units that only appear in loc file
+    existing_unit_ids = {r[0] for r in unit_rows}
     for uid_int, name in unit_names.items():
-        if uid_int not in {r[0] for r in unit_rows}:
+        if uid_int not in existing_unit_ids:
             unit_rows.append((uid_int, name, None, None, 0, None, None, 0))
 
     conn.executemany(
@@ -302,8 +303,9 @@ def import_pfquest(
                     respawn = int(pt[3]) if len(pt) > 3 else 0
                     obj_spawn_rows.append((oid_int, zone_id, x, y, respawn))
 
+    existing_obj_ids = {r[0] for r in obj_rows}
     for oid_int, name in obj_names.items():
-        if oid_int not in {r[0] for r in obj_rows}:
+        if oid_int not in existing_obj_ids:
             obj_rows.append((oid_int, name, None, None))
 
     conn.executemany(
@@ -367,8 +369,9 @@ def import_pfquest(
                 for vid, stock in (idata.get("V") or {}).items():
                     vendor_rows.append((iid_int, int(vid), int(stock)))
 
+    existing_item_ids = {r[0] for r in item_rows}
     for iid_int, name in item_names.items():
-        if iid_int not in {r[0] for r in item_rows}:
+        if iid_int not in existing_item_ids:
             item_rows.append((iid_int, name, None, None, None, None, None, None, None, None))
 
     conn.executemany(
@@ -535,8 +538,9 @@ def import_pfquest(
                 exclusive_rows.append((qid_int, c))
 
     # Any quests in loc file but missing from data file
+    existing_quest_ids = {r[0] for r in quest_rows}
     for qid_int, qloc in quest_locs.items():
-        if qid_int not in {r[0] for r in quest_rows}:
+        if qid_int not in existing_quest_ids:
             quest_rows.append(
                 (
                     qid_int,
