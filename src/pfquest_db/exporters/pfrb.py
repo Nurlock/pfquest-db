@@ -463,9 +463,8 @@ def export_all_lod_modules(
         db_file = ref_path / f"{flavor}.db"
         if not db_file.exists():
             continue
-        conn = sqlite3.connect(db_file)
-        mod_dir = export_pfrb_lod_module(conn, output_dir, flavor, locale=locale)
-        conn.close()
-        exported.append(mod_dir)
+        with sqlite3.connect(db_file) as conn:
+            mod_dir = export_pfrb_lod_module(conn, output_dir, flavor, locale=locale)
+            exported.append(mod_dir)
     return exported
 
