@@ -25,8 +25,17 @@ def cmd_init(args) -> int:
 
 def cmd_import_pfquest(args) -> int:
     conn = init_db(args.db)
-    print(f"Importing pfQuest [{args.flavor or 'classic'}] data from: {args.src} -> {args.db}")
-    stats = import_pfquest(args.src, conn, flavor=args.flavor, locale=args.locale)
+    if args.base_src:
+        print(f"Importing base pfQuest data from: {args.base_src} with overlay from: {args.src} -> {args.db}")
+    else:
+        print(f"Importing pfQuest [{args.flavor or 'classic'}] data from: {args.src} -> {args.db}")
+    stats = import_pfquest(
+        args.src,
+        conn,
+        flavor=args.flavor,
+        locale=args.locale,
+        base_src=args.base_src,
+    )
     conn.close()
     print("Import complete! Records imported/updated:")
     for table, count in stats.items():
@@ -129,6 +138,7 @@ def main(argv=None) -> int:
     # import-pfquest
     p_imp_pfq = subparsers.add_parser("import-pfquest", help="Import pfQuest Lua database into SQLite")
     p_imp_pfq.add_argument("--src", required=True, help="Path to pfQuest addon root directory")
+    p_imp_pfq.add_argument("--base-src", default=None, help="Optional path to base pfQuest addon directory (e.g. pfQuest-Reforged) to merge before overlay")
     p_imp_pfq.add_argument("--db", required=True, help="Path to target SQLite database")
     p_imp_pfq.add_argument("--flavor", default="epoch", help="pfQuest flavor ('epoch', 'wotlk', 'tbc', or '' for classic)")
     p_imp_pfq.add_argument("--locale", default="enUS", help="Locale folder name (default: enUS)")

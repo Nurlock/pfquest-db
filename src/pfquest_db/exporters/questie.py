@@ -100,7 +100,7 @@ def export_questie(
             # 6: rank, 7: spawns, 8: waypoints, 9: zoneID, 10: questStarts,
             # 11: questEnds, 12: factionID, 13: friendlyToFaction, 14: subName, 15: npcFlags
             fields = [
-                name,
+                name or f"Creature #{uid}",
                 None,
                 None,
                 min_l,
@@ -150,7 +150,7 @@ def export_questie(
 
             # Questie Object structure:
             # 1: name, 2: questStarts, 3: questEnds, 4: spawns, 5: zoneID, 6: factionID
-            fields = [name, q_starts, q_ends, o_spawns, None, fac_id]
+            fields = [name or f"Object #{oid}", q_starts, q_ends, o_spawns, None, fac_id]
             _trim_trailing_nils(fields)
             f.write(f"[{oid}] = {{{','.join(_serialize_compact(x) for x in fields)}}},\n")
         f.write("}]]\n")
@@ -199,7 +199,7 @@ def export_questie(
             # 6: questRewards, 7: flags, 8: foodType, 9: itemLevel, 10: requiredLevel,
             # 11: ammoType, 12: class, 13: subClass, 14: vendors, 15: relatedQuests, 16: teachesSpell
             fields = [
-                name,
+                name or f"Item #{iid}",
                 n_drops,
                 o_drops,
                 None,
@@ -321,7 +321,7 @@ def export_questie(
             req_max_rep = [max_rep_f, max_rep_v] if max_rep_f is not None and max_rep_v is not None else None
 
             fields = [
-                title,
+                title or f"Quest #{qid}",
                 st,
                 fin,
                 min_l,

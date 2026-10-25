@@ -1,6 +1,7 @@
 """pfQuest Lua database importer."""
 
 import sqlite3
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -55,25 +56,79 @@ def _parse_level_range(lvl_val) -> tuple[Optional[int], Optional[int]]:
     return None, None
 
 
+def apply_pfquest_overwrites(conn: sqlite3.Connection, overwrites_path: str | Path) -> dict[str, int]:
+    """Parse and apply pfQuest-epoch overwrites.lua to remove reworked/deleted entities."""
+    path = Path(overwrites_path)
+    if not path.exists():
+        return {}
+
+    lua_code = f"""
+    local pfDB = {{
+        units = {{ ["data-epoch"] = {{}}, ["enUS-epoch"] = {{}} }},
+        quests = {{ ["data-epoch"] = {{}}, ["enUS-epoch"] = {{}} }},
+        items = {{ ["data-epoch"] = {{}}, ["enUS-epoch"] = {{}} }},
+        objects = {{ ["data-epoch"] = {{}}, ["enUS-epoch"] = {{}} }},
+    }}
+    local f = loadfile("{path.resolve()}")
+    if f then
+        local env = setmetatable({{pfDB = pfDB}}, {{__index = _G}})
+        setfenv(f, env)
+        pcall(f)
+    end
+    for cat, tbl in pairs(pfDB) do
+        for id, _ in pairs(tbl["data-epoch"] or {{}}) do
+            io.write(cat .. ":" .. tostring(id) .. string.char(10))
+        end
+    end
+    """
+    proc = subprocess.run(["lua5.1", "-e", lua_code], capture_output=True, text=True, check=True)
+    removed: dict[str, list[tuple[int]]] = {"quests": [], "units": [], "objects": [], "items": []}
+    for line in proc.stdout.splitlines():
+        if ":" in line:
+            cat, sid = line.strip().split(":", 1)
+            if cat in removed and sid.isdigit():
+                removed[cat].append((int(sid),))
+
+    counts: dict[str, int] = {}
+    if removed["quests"]:
+        conn.executemany("DELETE FROM quests WHERE id = ?", removed["quests"])
+        conn.executemany("DELETE FROM quest_starters WHERE quest_id = ?", removed["quests"])
+        conn.executemany("DELETE FROM quest_finishers WHERE quest_id = ?", removed["quests"])
+        conn.executemany("DELETE FROM quest_objectives WHERE quest_id = ?", removed["quests"])
+        conn.executemany("DELETE FROM quest_prerequisites WHERE quest_id = ?", removed["quests"])
+        conn.executemany("DELETE FROM quest_exclusive WHERE quest_id = ?", removed["quests"])
+        counts["quests"] = len(removed["quests"])
+    if removed["units"]:
+        conn.executemany("DELETE FROM units WHERE id = ?", removed["units"])
+        conn.executemany("DELETE FROM unit_spawns WHERE unit_id = ?", removed["units"])
+        counts["units"] = len(removed["units"])
+    if removed["objects"]:
+        conn.executemany("DELETE FROM objects WHERE id = ?", removed["objects"])
+        conn.executemany("DELETE FROM object_spawns WHERE object_id = ?", removed["objects"])
+        counts["objects"] = len(removed["objects"])
+    if removed["items"]:
+        conn.executemany("DELETE FROM items WHERE id = ?", removed["items"])
+        conn.executemany("DELETE FROM item_drops WHERE item_id = ?", removed["items"])
+        conn.executemany("DELETE FROM item_vendors WHERE item_id = ?", removed["items"])
+        counts["items"] = len(removed["items"])
+
+    conn.commit()
+    return counts
+
+
 def import_pfquest(
     base_dir: str | Path,
     conn: sqlite3.Connection,
     flavor: str = "epoch",
     locale: str = "enUS",
+    base_src: Optional[str | Path] = None,
 ) -> dict[str, int]:
     """
     Import pfQuest database files from base_dir into SQLite database conn.
     flavor: 'epoch', 'tbc', 'wotlk', or '' (for vanilla/classic).
+    If base_src is provided, the base database is imported first with flavor='',
+    then the flavor overlay from base_dir is applied on top.
     """
-    base_path = Path(base_dir)
-    suffix = f"-{flavor}" if flavor else ""
-    loc_suffix = f"-{flavor}" if flavor else ""
-
-    data_dir = base_path / "db"
-    loc_dir = data_dir / locale
-
-    suffix_clean = suffix if suffix else ""
-
     stats = {
         "zones": 0,
         "units": 0,
@@ -89,6 +144,20 @@ def import_pfquest(
         "minimap": 0,
         "professions": 0,
     }
+
+    if base_src:
+        base_stats = import_pfquest(base_src, conn, flavor="", locale=locale)
+        for k, v in base_stats.items():
+            stats[k] += v
+
+    base_path = Path(base_dir)
+    suffix = f"-{flavor}" if flavor else ""
+    loc_suffix = f"-{flavor}" if flavor else ""
+
+    data_dir = base_path / "db"
+    loc_dir = data_dir / locale
+
+    suffix_clean = suffix if suffix else ""
 
     # 1. Zones
     zone_names: dict[int, str] = {}
@@ -176,7 +245,7 @@ def import_pfquest(
         INSERT INTO units (id, name, min_level, max_level, rank, faction, sub_name, npc_flags)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-            name = COALESCE(excluded.name, units.name),
+            name = COALESCE(NULLIF(excluded.name, ''), units.name),
             min_level = COALESCE(excluded.min_level, units.min_level),
             max_level = COALESCE(excluded.max_level, units.max_level),
             rank = COALESCE(excluded.rank, units.rank),
@@ -242,7 +311,7 @@ def import_pfquest(
         INSERT INTO objects (id, name, faction, faction_id)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-            name = COALESCE(excluded.name, objects.name),
+            name = COALESCE(NULLIF(excluded.name, ''), objects.name),
             faction = COALESCE(excluded.faction, objects.faction)
         """,
         obj_rows,
@@ -307,7 +376,7 @@ def import_pfquest(
         INSERT INTO items (id, name, item_level, required_level, class_id, subclass_id, food_type, ammo_type, flags, teaches_spell)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-            name = COALESCE(excluded.name, items.name)
+            name = COALESCE(NULLIF(excluded.name, ''), items.name)
         """,
         item_rows,
     )
@@ -503,13 +572,13 @@ def import_pfquest(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-            title = COALESCE(excluded.title, quests.title),
+            title = COALESCE(NULLIF(excluded.title, ''), quests.title),
             min_level = COALESCE(excluded.min_level, quests.min_level),
             quest_level = COALESCE(excluded.quest_level, quests.quest_level),
             required_races = COALESCE(excluded.required_races, quests.required_races),
             required_classes = COALESCE(excluded.required_classes, quests.required_classes),
-            objective_text = COALESCE(excluded.objective_text, quests.objective_text),
-            description = COALESCE(excluded.description, quests.description),
+            objective_text = COALESCE(NULLIF(excluded.objective_text, ''), quests.objective_text),
+            description = COALESCE(NULLIF(excluded.description, ''), quests.description),
             next_quest_id = COALESCE(excluded.next_quest_id, quests.next_quest_id)
         """,
         quest_rows,
@@ -629,5 +698,15 @@ def import_pfquest(
         )
         stats["professions"] = len(prof_rows)
 
+    overwrites_file = base_path / "overwrites.lua"
+    if overwrites_file.exists():
+        apply_pfquest_overwrites(conn, overwrites_file)
+
+    conn.execute("UPDATE quests SET title = 'Quest #' || id WHERE title IS NULL OR title = ''")
     conn.commit()
+
+    # Update stats with actual table counts
+    for tbl in ("quests", "units", "objects", "items"):
+        stats[tbl] = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+
     return stats

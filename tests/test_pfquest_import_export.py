@@ -78,3 +78,21 @@ def test_pfquest_idempotent_reimport(tmp_path, repo_root):
 
     # Counts must be identical (no duplicated records)
     assert stats1 == stats2
+
+
+def test_pfquest_base_and_overlay_import(tmp_path, repo_root):
+    base_dir = repo_root / "pfQuest-Reforged"
+    epoch_dir = repo_root / "pfQuest-epoch"
+    if not base_dir.exists() or not epoch_dir.exists():
+        pytest.skip("pfQuest-Reforged or pfQuest-epoch not found")
+
+    db_path = tmp_path / "merged.db"
+    conn = init_db(db_path)
+    stats = import_pfquest(epoch_dir, conn, flavor="epoch", base_src=base_dir)
+
+    # Quests should be merged (over 5,000 quests)
+    assert stats["quests"] > 5000
+    # Quests with NULL/empty title should be 0
+    cur = conn.execute("SELECT COUNT(*) FROM quests WHERE title IS NULL OR title = ''")
+    assert cur.fetchone()[0] == 0
+    conn.close()
