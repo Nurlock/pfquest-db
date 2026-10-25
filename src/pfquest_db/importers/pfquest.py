@@ -36,6 +36,14 @@ def _as_list(val) -> list[int]:
     return []
 
 
+def _iter_key_vals(val):
+    if isinstance(val, dict):
+        return val.items()
+    elif isinstance(val, list):
+        return enumerate(val, 1)
+    return []
+
+
 def _parse_level_range(lvl_val) -> tuple[Optional[int], Optional[int]]:
     if lvl_val is None:
         return None, None
@@ -360,13 +368,13 @@ def import_pfquest(
 
             if isinstance(idata, dict):
                 # Creature drops
-                for uid, chance in (idata.get("U") or {}).items():
+                for uid, chance in _iter_key_vals(idata.get("U")):
                     drop_rows.append((iid_int, "unit", int(uid), float(chance)))
                 # Object drops
-                for oid, chance in (idata.get("O") or {}).items():
+                for oid, chance in _iter_key_vals(idata.get("O")):
                     drop_rows.append((iid_int, "object", int(oid), float(chance)))
                 # Vendors
-                for vid, stock in (idata.get("V") or {}).items():
+                for vid, stock in _iter_key_vals(idata.get("V")):
                     vendor_rows.append((iid_int, int(vid), int(stock)))
 
     existing_item_ids = {r[0] for r in item_rows}
