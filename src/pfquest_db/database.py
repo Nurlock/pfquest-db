@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, Any
 
-from .schema import init_database
+from .schema import init_database, rebuild_search_index
 
 
 def get_connection(db_path: str | Path) -> sqlite3.Connection:

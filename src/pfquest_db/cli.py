@@ -1,13 +1,17 @@
 """Command line interface for pfQuest DB."""
 
 import argparse
+import csv
+import io
+import json
+import sqlite3
 import sys
 from pathlib import Path
 
-from .database import get_connection, init_db, get_db_stats
+from .database import get_connection, init_db, get_db_stats, rebuild_search_index
 from .importers import import_pfquest, import_questie
 from .exporters import export_pfquest, export_questie
-from .schema import SCHEMA_SQL
+from .schema import SCHEMA_SQL, FTS_SCHEMA_SQL
 
 
 def _require_existing_db(db_path: str) -> None:
@@ -94,7 +98,13 @@ def cmd_stats(args) -> int:
 def cmd_query(args) -> int:
     _require_existing_db(args.db)
     conn = get_connection(args.db)
-    cur = conn.execute(args.sql)
+    try:
+        cur = conn.execute(args.sql)
+    except sqlite3.Error as e:
+        print(f"SQL Error: {e}", file=sys.stderr)
+        conn.close()
+        return 1
+
     if cur.description is None:
         conn.commit()
         print(f"Query executed successfully ({cur.rowcount} row(s) affected).")
@@ -102,19 +112,106 @@ def cmd_query(args) -> int:
         return 0
 
     rows = cur.fetchall()
-    if not rows:
-        print("No results returned.")
-        conn.close()
-        return 0
-
     col_names = [d[0] for d in cur.description]
-    # Format as table
-    print(" | ".join(col_names))
-    print("-+-".join("-" * len(c) for c in col_names))
-    for r in rows:
-        print(" | ".join(str(val) if val is not None else "NULL" for val in r))
-    print(f"\n({len(rows)} row(s))")
+    fmt = getattr(args, "format", "table") or "table"
+
+    if fmt == "json":
+        data = [dict(zip(col_names, list(r))) for r in rows]
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    elif fmt == "csv":
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(col_names)
+        for r in rows:
+            writer.writerow(list(r))
+        print(out.getvalue(), end="")
+    elif fmt == "markdown":
+        if not rows:
+            print("No results returned.")
+        else:
+            print("| " + " | ".join(col_names) + " |")
+            print("| " + " | ".join("---" for _ in col_names) + " |")
+            for r in rows:
+                print("| " + " | ".join(str(val) if val is not None else "" for val in r) + " |")
+    else:  # table
+        if not rows:
+            print("No results returned.")
+        else:
+            print(" | ".join(col_names))
+            print("-+-".join("-" * len(c) for c in col_names))
+            for r in rows:
+                print(" | ".join(str(val) if val is not None else "NULL" for val in r))
+            print(f"\n({len(rows)} row(s))")
+
     conn.close()
+    return 0
+
+
+def cmd_search(args) -> int:
+    _require_existing_db(args.db)
+    conn = get_connection(args.db)
+    sql = """
+        SELECT entity_type, entity_id, name, extra_text, rank
+        FROM search_index
+        WHERE search_index MATCH ?
+    """
+    params = [args.query]
+    if args.type:
+        sql += " AND entity_type = ?"
+        params.append(args.type)
+    sql += " ORDER BY rank LIMIT ?"
+    params.append(args.limit)
+
+    try:
+        cur = conn.execute(sql, params)
+        rows = cur.fetchall()
+    except sqlite3.OperationalError as e:
+        print(f"Search error: {e}. Try running 'pfquest-db rebuild-index --db {args.db}' first.", file=sys.stderr)
+        conn.close()
+        return 1
+
+    fmt = getattr(args, "format", "table") or "table"
+    col_names = ["type", "id", "name", "snippet"]
+    formatted_rows = [
+        [r[0], r[1], r[2], (r[3][:60] + "...") if len(r[3] or "") > 60 else (r[3] or "")]
+        for r in rows
+    ]
+
+    if fmt == "json":
+        data = [
+            {"type": r[0], "id": r[1], "name": r[2], "details": r[3]}
+            for r in rows
+        ]
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    elif fmt == "markdown":
+        if not formatted_rows:
+            print("No matches found.")
+        else:
+            print("| " + " | ".join(col_names) + " |")
+            print("| " + " | ".join("---" for _ in col_names) + " |")
+            for r in formatted_rows:
+                print("| " + " | ".join(str(val) for val in r) + " |")
+    else:
+        if not formatted_rows:
+            print("No matches found.")
+        else:
+            print(f"{'Type':<8} {'ID':<8} {'Name':<35} Details")
+            print("-" * 75)
+            for r in formatted_rows:
+                print(f"{r[0]:<8} {r[1]:<8} {str(r[2])[:34]:<35} {r[3]}")
+            print(f"\n({len(rows)} result(s))")
+
+    conn.close()
+    return 0
+
+
+def cmd_rebuild_index(args) -> int:
+    _require_existing_db(args.db)
+    conn = get_connection(args.db)
+    print(f"Rebuilding FTS5 search index on: {args.db} ...")
+    count = rebuild_search_index(conn)
+    conn.close()
+    print(f"Search index rebuild complete: {count:,} records indexed.")
     return 0
 
 
@@ -175,7 +272,22 @@ def main(argv=None) -> int:
     p_query = subparsers.add_parser("query", help="Execute an SQL query against the database and display results")
     p_query.add_argument("--db", required=True, help="Path to SQLite database")
     p_query.add_argument("sql", help="SQL query to execute")
+    p_query.add_argument("--format", choices=["table", "json", "csv", "markdown"], default="table", help="Output format (default: table)")
     p_query.set_defaults(func=cmd_query)
+
+    # search
+    p_search = subparsers.add_parser("search", help="Full-text search across quests, NPCs, items, and objects")
+    p_search.add_argument("--db", required=True, help="Path to SQLite database")
+    p_search.add_argument("query", help="Search keyword(s) or FTS5 expression")
+    p_search.add_argument("--type", choices=["quest", "unit", "item", "object"], default=None, help="Filter by entity type")
+    p_search.add_argument("--limit", type=int, default=25, help="Maximum number of results (default: 25)")
+    p_search.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="Output format (default: table)")
+    p_search.set_defaults(func=cmd_search)
+
+    # rebuild-index
+    p_rebuild = subparsers.add_parser("rebuild-index", help="Rebuild the FTS5 full-text search index")
+    p_rebuild.add_argument("--db", required=True, help="Path to SQLite database")
+    p_rebuild.set_defaults(func=cmd_rebuild_index)
 
     # schema
     p_schema = subparsers.add_parser("dump-schema", help="Print the DDL schema SQL")

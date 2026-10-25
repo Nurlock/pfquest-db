@@ -229,6 +229,136 @@ SELECT
     q.description
 FROM quests q;
 
+DROP VIEW IF EXISTS v_quest_details;
+CREATE VIEW v_quest_details AS
+SELECT 
+    q.id AS quest_id,
+    q.title,
+    q.min_level,
+    q.quest_level,
+    q.required_races,
+    q.required_classes,
+    (SELECT GROUP_CONCAT(COALESCE(u.name, 'Unit #' || qs.starter_id) || ' (' || qs.starter_type || ')', '; ')
+     FROM quest_starters qs
+     LEFT JOIN units u ON qs.starter_type = 'unit' AND qs.starter_id = u.id
+     WHERE qs.quest_id = q.id) AS starters,
+    (SELECT GROUP_CONCAT(COALESCE(u.name, 'Unit #' || qf.finisher_id) || ' (' || qf.finisher_type || ')', '; ')
+     FROM quest_finishers qf
+     LEFT JOIN units u ON qf.finisher_type = 'unit' AND qf.finisher_id = u.id
+     WHERE qf.quest_id = q.id) AS finishers,
+    (SELECT GROUP_CONCAT(
+        CASE qo.objective_type
+            WHEN 'unit' THEN 'Kill: ' || COALESCE(u.name, 'Unit #' || qo.target_id) || ' x' || qo.amount
+            WHEN 'item' THEN 'Collect: ' || COALESCE(i.name, 'Item #' || qo.target_id) || ' x' || qo.amount
+            WHEN 'object' THEN 'Interact: ' || COALESCE(o.name, 'Object #' || qo.target_id) || ' x' || qo.amount
+            WHEN 'itemreq' THEN 'Require Item: ' || COALESCE(i.name, 'Item #' || qo.target_id)
+            WHEN 'reputation' THEN 'Reputation: ' || qo.target_id || ' >= ' || qo.amount
+            ELSE COALESCE(qo.text, qo.objective_type)
+        END, ' | ')
+     FROM quest_objectives qo
+     LEFT JOIN units u ON qo.objective_type = 'unit' AND qo.target_id = u.id
+     LEFT JOIN items i ON qo.objective_type IN ('item', 'itemreq') AND qo.target_id = i.id
+     LEFT JOIN objects o ON qo.objective_type = 'object' AND qo.target_id = o.id
+     WHERE qo.quest_id = q.id) AS objectives,
+    (SELECT GROUP_CONCAT(qp.pre_quest_id || ' (' || COALESCE(pq.title, 'Unknown') || ')', ', ')
+     FROM quest_prerequisites qp
+     LEFT JOIN quests pq ON qp.pre_quest_id = pq.id
+     WHERE qp.quest_id = q.id) AS prerequisites,
+    q.next_quest_id,
+    (SELECT title FROM quests WHERE id = q.next_quest_id) AS next_quest_title,
+    (SELECT GROUP_CONCAT(qe.exclusive_quest_id || ' (' || COALESCE(eq.title, 'Unknown') || ')', ', ')
+     FROM quest_exclusive qe
+     LEFT JOIN quests eq ON qe.exclusive_quest_id = eq.id
+     WHERE qe.quest_id = q.id) AS exclusive_with,
+    q.objective_text,
+    q.description
+FROM quests q;
+
+DROP VIEW IF EXISTS v_quest_objectives;
+CREATE VIEW v_quest_objectives AS
+SELECT 
+    qo.quest_id,
+    q.title AS quest_title,
+    qo.objective_type,
+    qo.target_id,
+    CASE qo.objective_type
+        WHEN 'unit' THEN u.name
+        WHEN 'item' THEN i.name
+        WHEN 'itemreq' THEN i.name
+        WHEN 'object' THEN o.name
+        ELSE NULL
+    END AS target_name,
+    qo.amount,
+    qo.text AS custom_text,
+    qo.icon
+FROM quest_objectives qo
+JOIN quests q ON qo.quest_id = q.id
+LEFT JOIN units u ON qo.objective_type = 'unit' AND qo.target_id = u.id
+LEFT JOIN items i ON qo.objective_type IN ('item', 'itemreq') AND qo.target_id = i.id
+LEFT JOIN objects o ON qo.objective_type = 'object' AND qo.target_id = o.id;
+
+DROP VIEW IF EXISTS v_npc_details;
+CREATE VIEW v_npc_details AS
+SELECT 
+    u.id,
+    u.name,
+    u.sub_name,
+    u.min_level,
+    u.max_level,
+    u.rank,
+    u.faction,
+    (SELECT GROUP_CONCAT(DISTINCT z.name)
+     FROM unit_spawns s
+     JOIN zones z ON s.zone_id = z.id
+     WHERE s.unit_id = u.id) AS zones,
+    (SELECT count(*) FROM unit_spawns WHERE unit_id = u.id) AS spawn_count,
+    (SELECT GROUP_CONCAT(qs.quest_id || ': ' || q.title, '; ')
+     FROM quest_starters qs
+     JOIN quests q ON qs.quest_id = q.id
+     WHERE qs.starter_type = 'unit' AND qs.starter_id = u.id) AS quests_started,
+    (SELECT GROUP_CONCAT(qf.quest_id || ': ' || q.title, '; ')
+     FROM quest_finishers qf
+     JOIN quests q ON qf.quest_id = q.id
+     WHERE qf.finisher_type = 'unit' AND qf.finisher_id = u.id) AS quests_ended
+FROM units u;
+
+DROP VIEW IF EXISTS v_item_sources;
+CREATE VIEW v_item_sources AS
+SELECT 
+    i.id AS item_id,
+    i.name AS item_name,
+    i.item_level,
+    i.required_level,
+    d.source_type,
+    d.source_id,
+    CASE d.source_type
+        WHEN 'unit' THEN u.name
+        WHEN 'object' THEN o.name
+        ELSE 'Unknown'
+    END AS source_name,
+    d.drop_chance,
+    (SELECT GROUP_CONCAT(DISTINCT z.name)
+     FROM unit_spawns s JOIN zones z ON s.zone_id = z.id
+     WHERE d.source_type = 'unit' AND s.unit_id = d.source_id) AS drop_zones,
+    (SELECT qs.quest_id FROM quest_starters qs WHERE qs.starter_type = 'item' AND qs.starter_id = i.id LIMIT 1) AS starts_quest_id
+FROM items i
+JOIN item_drops d ON i.id = d.item_id
+LEFT JOIN units u ON d.source_type = 'unit' AND d.source_id = u.id
+LEFT JOIN objects o ON d.source_type = 'object' AND d.source_id = o.id;
+
+DROP VIEW IF EXISTS v_zone_summary;
+CREATE VIEW v_zone_summary AS
+SELECT 
+    z.id AS zone_id,
+    z.name AS zone_name,
+    z.map_id,
+    (SELECT count(DISTINCT s.unit_id) FROM unit_spawns s WHERE s.zone_id = z.id) AS unique_units,
+    (SELECT count(*) FROM unit_spawns s WHERE s.zone_id = z.id) AS unit_spawns,
+    (SELECT count(DISTINCT s.object_id) FROM object_spawns s WHERE s.zone_id = z.id) AS unique_objects,
+    (SELECT count(*) FROM object_spawns s WHERE s.zone_id = z.id) AS object_spawns
+FROM zones z
+WHERE z.id IN (SELECT DISTINCT zone_id FROM unit_spawns UNION SELECT DISTINCT zone_id FROM object_spawns);
+
 DROP VIEW IF EXISTS v_spawns;
 CREATE VIEW v_spawns AS
 SELECT 'unit' AS entity_type, s.unit_id AS entity_id, u.name, s.zone_id, z.name AS zone_name, s.x, s.y, s.respawn_time
@@ -272,8 +402,52 @@ LEFT JOIN items i ON v.item_id = i.id
 LEFT JOIN units u ON v.unit_id = u.id;
 """
 
+FTS_SCHEMA_SQL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+    entity_type UNINDEXED,
+    entity_id UNINDEXED,
+    name,
+    extra_text,
+    tokenize = 'porter unicode61'
+);
+"""
+
 
 def init_database(conn) -> None:
     """Initialize the schema, tables, indexes, and views on the given connection."""
     conn.executescript(SCHEMA_SQL)
+    conn.executescript(FTS_SCHEMA_SQL)
     conn.commit()
+
+
+def rebuild_search_index(conn) -> int:
+    """Rebuild the FTS5 search index from all core tables."""
+    conn.executescript("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+            entity_type UNINDEXED,
+            entity_id UNINDEXED,
+            name,
+            extra_text,
+            tokenize = 'porter unicode61'
+        );
+        DELETE FROM search_index;
+
+        INSERT INTO search_index(entity_type, entity_id, name, extra_text)
+        SELECT 'quest', id, title, COALESCE(objective_text, '') || ' ' || COALESCE(description, '')
+        FROM quests WHERE title IS NOT NULL;
+
+        INSERT INTO search_index(entity_type, entity_id, name, extra_text)
+        SELECT 'unit', id, name, COALESCE(sub_name, '')
+        FROM units WHERE name IS NOT NULL;
+
+        INSERT INTO search_index(entity_type, entity_id, name, extra_text)
+        SELECT 'item', id, name, ''
+        FROM items WHERE name IS NOT NULL;
+
+        INSERT INTO search_index(entity_type, entity_id, name, extra_text)
+        SELECT 'object', id, name, ''
+        FROM objects WHERE name IS NOT NULL;
+    """)
+    conn.commit()
+    cur = conn.execute("SELECT count(*) FROM search_index")
+    return cur.fetchone()[0]

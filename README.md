@@ -9,11 +9,18 @@ A toolkit and SQLite database for World of Warcraft databases, based on **pfQues
 - **Relational SQLite Database (`epoch.db`)**:
   - Full relational schema covering Quests, Units (NPCs), GameObjects, Items, Spawns, Drop tables, Vendors, Zones, Minimap scales, and Area triggers.
   - Foreign key integrity and query indexes.
-  - Pre-built views for easy interactive querying:
+  - **FTS5 Full-Text Search Engine**: Fast natural-language search over quest text, NPC names, item names, and descriptions.
+  - **Prompt-Friendly Views**:
+    - `v_quest_details`: Full quest card with resolved starters, finishers, formatted objectives, prerequisites, next quests, and descriptions.
     - `v_quests`: Quests with resolved quest-giver and turn-in NPC names.
+    - `v_quest_objectives`: Detailed objective lines with resolved target names and counts.
+    - `v_npc_details`: NPC level range, faction, zones, spawn count, quests started/ended.
+    - `v_item_sources`: Item drops, drop rates, drop zones, vendors, and quest starters.
     - `v_spawns`: Unified view of unit and object spawn coordinates with resolved zone names.
     - `v_drops`: Item drops with source NPC/object names and drop rates.
     - `v_vendors`: Items sold by vendors with NPC names and stock counts.
+    - `v_zone_summary`: Summary of active zones with unit and spawn densities.
+- **Multiple Output Formats**: Export query and search results in `json`, `markdown`, `csv`, or formatted ASCII `table`. See [PROMPTING.md](PROMPTING.md) for query recipes and LLM prompts.
 - **Bidirectional Converters**:
   - **pfQuest**: Import and export pfQuest Lua formats (`db/*-epoch.lua`, `db/enUS/*-epoch.lua`, and standard/Reforged flavors).
   - **Questie**: Import and export Questie database formats (`wotlkQuestDB.lua`, `wotlkNpcDB.lua`, etc.).
