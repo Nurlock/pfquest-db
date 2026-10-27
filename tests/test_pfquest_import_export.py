@@ -9,7 +9,7 @@ from pfquest_db.exporters.pfquest import export_pfquest
 
 @pytest.fixture
 def repo_root():
-    # pfquest-db parent directory is /home/ourouk/Projects/pfquest
+    # pfquest-db parent directory is ~/Projects/Gaming
     return Path(__file__).resolve().parent.parent.parent
 
 

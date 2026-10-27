@@ -396,9 +396,13 @@ def export_pfrb_lod_module(
         r'  <Include file="..\db\items.lua" />',
         r'  <Include file="..\db\units.lua" />',
         r'  <Include file="..\db\objects.lua" />',
+    ]
+    if (mod_dir / "db" / "quests-itemreq.lua").exists():
+        data_includes.append(r'  <Include file="..\db\quests-itemreq.lua" />')
+    data_includes.extend([
         r'  <Include file="..\db\quests.lua" />',
         r'  <Include file="..\db\zones.lua" />',
-    ]
+    ])
     if (mod_dir / "db" / "minimap.lua").exists():
         data_includes.append(r'  <Include file="..\db\minimap.lua" />')
     if (mod_dir / "db" / "areatrigger.lua").exists():
