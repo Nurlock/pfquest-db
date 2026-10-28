@@ -64,6 +64,37 @@ def _parse_level_range(lvl_val) -> tuple[Optional[int], Optional[int]]:
     return None, None
 
 
+def _purge_entity_children(conn: sqlite3.Connection, category: str, ids: list[int]) -> None:
+    """Delete child rows for entity ids about to be (re)written by a layer.
+
+    Mirrors the runtime patchtable replace semantics (base[k] = v): when an
+    overlay layer provides a new version of an entry, stale child rows from
+    the previous layer must go. Without this, moved NPCs keep their old
+    spawn pins (dead markers), and changed quests keep stale givers/drops.
+
+    NOTE: quest link rows that merely *reference* these ids from *other*
+    quests (e.g. quest A's prereq pointing at quest B, or a starter row on
+    quest C naming deleted NPC D) are NOT touched here — that is the job of
+    apply_pfquest_overwrites(), which handles entity deletions.
+    """
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    if category == "units":
+        conn.execute(f"DELETE FROM unit_spawns WHERE unit_id IN ({placeholders})", ids)
+    elif category == "objects":
+        conn.execute(f"DELETE FROM object_spawns WHERE object_id IN ({placeholders})", ids)
+    elif category == "items":
+        conn.execute(f"DELETE FROM item_drops WHERE item_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM item_vendors WHERE item_id IN ({placeholders})", ids)
+    elif category == "quests":
+        conn.execute(f"DELETE FROM quest_starters WHERE quest_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM quest_finishers WHERE quest_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM quest_objectives WHERE quest_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM quest_prerequisites WHERE quest_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM quest_exclusive WHERE quest_id IN ({placeholders})", ids)
+
+
 def apply_pfquest_overwrites(conn: sqlite3.Connection, overwrites_path: str | Path) -> dict[str, int]:
     """Parse and apply pfQuest-epoch overwrites.lua to remove reworked/deleted entities."""
     path = Path(overwrites_path)
@@ -99,25 +130,84 @@ def apply_pfquest_overwrites(conn: sqlite3.Connection, overwrites_path: str | Pa
 
     counts: dict[str, int] = {}
     if removed["quests"]:
+        rids = [r[0] for r in removed["quests"]]
+        placeholders = ",".join("?" for _ in rids)
         conn.executemany("DELETE FROM quests WHERE id = ?", removed["quests"])
         conn.executemany("DELETE FROM quest_starters WHERE quest_id = ?", removed["quests"])
         conn.executemany("DELETE FROM quest_finishers WHERE quest_id = ?", removed["quests"])
         conn.executemany("DELETE FROM quest_objectives WHERE quest_id = ?", removed["quests"])
         conn.executemany("DELETE FROM quest_prerequisites WHERE quest_id = ?", removed["quests"])
+        conn.executemany("DELETE FROM quest_prerequisites WHERE pre_quest_id = ?", removed["quests"])
         conn.executemany("DELETE FROM quest_exclusive WHERE quest_id = ?", removed["quests"])
+        conn.executemany("DELETE FROM quest_exclusive WHERE exclusive_quest_id = ?", removed["quests"])
+        # Quests pointing at a removed quest via next_quest_id: clear the link.
+        conn.execute(
+            f"UPDATE quests SET next_quest_id = NULL WHERE next_quest_id IN ({placeholders})",
+            rids,
+        )
         counts["quests"] = len(removed["quests"])
     if removed["units"]:
+        uids = [r[0] for r in removed["units"]]
+        placeholders = ",".join("?" for _ in uids)
         conn.executemany("DELETE FROM units WHERE id = ?", removed["units"])
         conn.executemany("DELETE FROM unit_spawns WHERE unit_id = ?", removed["units"])
+        # Purge references to removed NPCs so exports don't emit dead markers.
+        conn.execute(
+            f"DELETE FROM quest_starters WHERE starter_type = 'unit' AND starter_id IN ({placeholders})",
+            uids,
+        )
+        conn.execute(
+            f"DELETE FROM quest_finishers WHERE finisher_type = 'unit' AND finisher_id IN ({placeholders})",
+            uids,
+        )
+        conn.execute(
+            f"DELETE FROM quest_objectives WHERE objective_type = 'unit' AND target_id IN ({placeholders})",
+            uids,
+        )
+        conn.execute(
+            f"DELETE FROM item_drops WHERE source_type = 'unit' AND source_id IN ({placeholders})",
+            uids,
+        )
+        conn.execute(f"DELETE FROM item_vendors WHERE unit_id IN ({placeholders})", uids)
         counts["units"] = len(removed["units"])
     if removed["objects"]:
+        oids = [r[0] for r in removed["objects"]]
+        placeholders = ",".join("?" for _ in oids)
         conn.executemany("DELETE FROM objects WHERE id = ?", removed["objects"])
         conn.executemany("DELETE FROM object_spawns WHERE object_id = ?", removed["objects"])
+        # Purge references to removed objects.
+        conn.execute(
+            f"DELETE FROM quest_starters WHERE starter_type = 'object' AND starter_id IN ({placeholders})",
+            oids,
+        )
+        conn.execute(
+            f"DELETE FROM quest_finishers WHERE finisher_type = 'object' AND finisher_id IN ({placeholders})",
+            oids,
+        )
+        conn.execute(
+            f"DELETE FROM quest_objectives WHERE objective_type = 'object' AND target_id IN ({placeholders})",
+            oids,
+        )
+        conn.execute(
+            f"DELETE FROM item_drops WHERE source_type = 'object' AND source_id IN ({placeholders})",
+            oids,
+        )
         counts["objects"] = len(removed["objects"])
     if removed["items"]:
+        iids = [r[0] for r in removed["items"]]
+        placeholders = ",".join("?" for _ in iids)
         conn.executemany("DELETE FROM items WHERE id = ?", removed["items"])
         conn.executemany("DELETE FROM item_drops WHERE item_id = ?", removed["items"])
         conn.executemany("DELETE FROM item_vendors WHERE item_id = ?", removed["items"])
+        # Purge references to removed items.
+        conn.execute(
+            f"DELETE FROM quest_starters WHERE starter_type = 'item' AND starter_id IN ({placeholders})",
+            iids,
+        )
+        conn.execute(
+            f"DELETE FROM quest_objectives WHERE objective_type IN ('item', 'itemreq') AND target_id IN ({placeholders})",
+            iids,
+        )
         counts["items"] = len(removed["items"])
 
     conn.commit()
@@ -224,11 +314,13 @@ def import_pfquest(
     unit_data_file = data_dir / f"units{suffix}.lua"
     unit_rows = []
     spawn_rows = []
+    unit_data_ids: set[int] = set()
     if unit_data_file.exists():
         data_key = f"data{suffix}"
         expr = f'pfDB["units"]["{data_key}"] or pfDB["units"]["data"]'
         for uid, udata in iter_lua_table_entries(unit_data_file, expr, PRE_CODE_TEMPLATE):
             uid_int = int(uid)
+            unit_data_ids.add(uid_int)
             name = unit_names.get(uid_int)
             min_l, max_l = _parse_level_range(udata.get("lvl") if isinstance(udata, dict) else None)
             rank = udata.get("rnk", 0) if isinstance(udata, dict) else 0
@@ -248,6 +340,12 @@ def import_pfquest(
     for uid_int, name in unit_names.items():
         if uid_int not in existing_unit_ids:
             unit_rows.append((uid_int, name, None, None, 0, None, None, 0))
+
+    # Overlay layers replace whole entries (mirrors runtime patchtable:
+    # base[k] = v). Purge stale child rows for overlaid ids first, so moved
+    # or changed entries don't keep ghost base data (dead map pins).
+    overlaid_unit_ids = sorted({r[0] for r in unit_rows} & set(unit_data_ids))
+    _purge_entity_children(conn, "units", overlaid_unit_ids)
 
     conn.executemany(
         """
@@ -282,6 +380,10 @@ def import_pfquest(
     )
     stats["unit_spawns"] = len(spawn_rows)
 
+    # Overlay layers replace whole entries (mirrors runtime patchtable:
+    # base[k] = v). Purge stale base rows for overlaid entity ids first,
+    # so moved/changed entries don't keep ghost data (dead map pins).
+
     # 3. Objects
     obj_names: dict[int, str] = {}
     obj_loc_file = loc_dir / f"objects{loc_suffix}.lua"
@@ -294,11 +396,13 @@ def import_pfquest(
     obj_data_file = data_dir / f"objects{suffix}.lua"
     obj_rows = []
     obj_spawn_rows = []
+    obj_data_ids: set[int] = set()
     if obj_data_file.exists():
         data_key = f"data{suffix}"
         expr = f'pfDB["objects"]["{data_key}"] or pfDB["objects"]["data"]'
         for oid, odata in iter_lua_table_entries(obj_data_file, expr, PRE_CODE_TEMPLATE):
             oid_int = int(oid)
+            obj_data_ids.add(oid_int)
             name = obj_names.get(oid_int)
             fac = odata.get("fac") if isinstance(odata, dict) else None
             obj_rows.append((oid_int, name, fac, None))
@@ -315,6 +419,8 @@ def import_pfquest(
     for oid_int, name in obj_names.items():
         if oid_int not in existing_obj_ids:
             obj_rows.append((oid_int, name, None, None))
+
+    _purge_entity_children(conn, "objects", sorted({r[0] for r in obj_rows} & set(obj_data_ids)))
 
     conn.executemany(
         """
@@ -358,11 +464,13 @@ def import_pfquest(
     item_rows = []
     drop_rows = []
     vendor_rows = []
+    item_data_ids: set[int] = set()
     if item_data_file.exists():
         data_key = f"data{suffix}"
         expr = f'pfDB["items"]["{data_key}"] or pfDB["items"]["data"]'
         for iid, idata in iter_lua_table_entries(item_data_file, expr, PRE_CODE_TEMPLATE):
             iid_int = int(iid)
+            item_data_ids.add(iid_int)
             name = item_names.get(iid_int)
             item_rows.append((iid_int, name, None, None, None, None, None, None, None, None))
 
@@ -381,6 +489,8 @@ def import_pfquest(
     for iid_int, name in item_names.items():
         if iid_int not in existing_item_ids:
             item_rows.append((iid_int, name, None, None, None, None, None, None, None, None))
+
+    _purge_entity_children(conn, "items", sorted({r[0] for r in item_rows} & item_data_ids))
 
     conn.executemany(
         """
@@ -438,12 +548,14 @@ def import_pfquest(
     objective_rows = []
     prereq_rows = []
     exclusive_rows = []
+    quest_data_ids: set[int] = set()
 
     if quest_data_file.exists():
         data_key = f"data{suffix}"
         expr = f'pfDB["quests"]["{data_key}"] or pfDB["quests"]["data"]'
         for qid, qdata in iter_lua_table_entries(quest_data_file, expr, PRE_CODE_TEMPLATE):
             qid_int = int(qid)
+            quest_data_ids.add(qid_int)
             qloc = quest_locs.get(qid_int, {})
             title = qloc.get("T")
             obj_text = qloc.get("O")
@@ -596,6 +708,8 @@ def import_pfquest(
         quest_rows,
     )
     stats["quests"] = len(quest_rows)
+
+    _purge_entity_children(conn, "quests", sorted({r[0] for r in quest_rows} & quest_data_ids))
 
     conn.executemany(
         """
